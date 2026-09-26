@@ -1,0 +1,23 @@
+
+.gitignore · GITIGNORE
+# Environment / secrets — never commit real credentials
+.env
+server/.env
+client/.env
+ 
+# Dependencies
+node_modules/
+server/node_modules/
+client/node_modules/
+ 
+# Build output
+client/dist/
+server/dist/
+ 
+# Prisma
+server/prisma/migrations/**/migration_lock.toml
+ 
+# OS / editor
+.DS_Store
+.vscode/
+ 
