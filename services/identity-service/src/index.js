@@ -1,8 +1,9 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/auth.routes');
 const internalRoutes = require('./routes/internal.routes');
+const entityRoutes = require('./routes/entities.routes');
 
 const app = express();
 app.use(cors());
@@ -10,6 +11,7 @@ app.use(express.json());
 
 app.use('/auth', authRoutes);
 app.use('/internal', internalRoutes);
+app.use('/', entityRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'identity-service' }));
 

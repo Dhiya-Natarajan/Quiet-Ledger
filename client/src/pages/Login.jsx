@@ -1,53 +1,69 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+﻿import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { loginUser } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
-
-const inputStyle = { display: 'block', width: '100%', marginBottom: 10, padding: 8 };
+import Navbar from '../components/Navbar';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setLoading(true);
     setError('');
     try {
-      const data = await loginUser({ email, password });
-      login(data.token, data.user);
+      const { token } = await loginUser({ email, password });
+      await login(token);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      setError(err.response?.data?.message || err.response?.data?.error || 'Login failed. Check your credentials.');
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <div style={{ maxWidth: 360, margin: '80px auto' }}>
-      <h2>QuietLedger Login</h2>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          style={inputStyle}
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          style={inputStyle}
-        />
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" style={{ width: '100%', padding: 10 }}>Log in</button>
-      </form>
-      <p>No account? <a href="/register">Register</a></p>
-    </div>
+    <>
+      <Navbar />
+      <div className="auth-wrapper">
+        <div className="auth-card">
+          <h2>Sign In</h2>
+          {error && <div className="alert alert-error">{error}</div>}
+          <form onSubmit={handleSubmit} className="form-stack">
+            <label>Username / Email
+              <input
+                type="text"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="Enter your email address"
+                required
+                autoComplete="username"
+              />
+            </label>
+            <label>Password
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                required
+                autoComplete="current-password"
+              />
+            </label>
+            <button className="btn-primary" type="submit" disabled={loading}>
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+          <div className="auth-footer">
+            Don't have an account? <Link to="/register">Register</Link>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
