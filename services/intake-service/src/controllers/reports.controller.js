@@ -1,6 +1,6 @@
 ﻿const crypto = require('crypto');
 const pool = require('../config/db');
-const { checkOrgApproved, checkStationApproved } = require('../clients/identityClient');
+const { checkOrgApproved, checkStationApproved, getUserById } = require('../clients/identityClient');
 
 function generateTrackingToken() {
   return crypto.randomBytes(16).toString('hex');
@@ -67,19 +67,55 @@ async function getMyReports(req, res) {
 
 async function getAssignedReports(req, res) {
   try {
-    const { role, org_id, station_id } = req.user;
+    const { role, org_id, station_id, orgId, stationId } = req.user;
+    const resolvedOrgId = org_id || orgId;
+    const resolvedStationId = station_id || stationId;
+
     let result;
     if (role === 'organisation') {
-      result = await pool.query('SELECT * FROM reports WHERE org_id=$1 ORDER BY created_at DESC', [org_id]);
+      result = await pool.query('SELECT * FROM reports WHERE org_id=$1 ORDER BY created_at DESC', [resolvedOrgId]);
     } else if (role === 'police') {
-      result = await pool.query('SELECT * FROM reports WHERE station_id=$1 ORDER BY created_at DESC', [station_id]);
+      result = await pool.query('SELECT * FROM reports WHERE station_id=$1 ORDER BY created_at DESC', [resolvedStationId]);
     } else {
+      // platform_admin
       result = await pool.query('SELECT * FROM reports ORDER BY created_at DESC');
     }
-    const sanitized = result.rows.map(r => r.is_anonymous ? { ...r, reporter_id: null } : r);
-    res.json(sanitized);
+
+    const reportsWithDetails = await Promise.all(
+      result.rows.map(async (r) => {
+        if (r.is_anonymous) {
+          return {
+            ...r,
+            reporter_id: null,
+            reporter: null,
+          };
+        }
+
+        // When NOT anonymous, fetch the real personal details from identity-service
+        let reporterInfo = null;
+        if (r.reporter_id) {
+          const u = await getUserById(r.reporter_id);
+          if (u) {
+            reporterInfo = {
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              phone_number: u.phone_number,
+              role: u.role,
+            };
+          }
+        }
+
+        return {
+          ...r,
+          reporter: reporterInfo,
+        };
+      })
+    );
+
+    res.json(reportsWithDetails);
   } catch (err) {
-    console.error(err);
+    console.error('getAssignedReports error:', err);
     res.status(500).json({ message: 'Failed to fetch assigned reports' });
   }
 }
@@ -114,14 +150,14 @@ async function sendMessage(req, res) {
   try {
     const { id } = req.params;
     const { body } = req.body;
-    if (!body) return res.status(400).json({ message: 'body is required' });
+    if (!body || !body.trim()) return res.status(400).json({ message: 'body is required' });
     const result = await pool.query(
       `INSERT INTO report_messages (report_id, sender_user_id, body) VALUES ($1,$2,$3) RETURNING *`,
-      [id, req.user.id, body]
+      [id, req.user.id, body.trim()]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error(err);
+    console.error('sendMessage error:', err);
     res.status(500).json({ message: 'Failed to send message' });
   }
 }
@@ -129,15 +165,35 @@ async function sendMessage(req, res) {
 async function getMessages(req, res) {
   try {
     const { id } = req.params;
+    const reportRes = await pool.query('SELECT reporter_id, is_anonymous FROM reports WHERE id=$1', [id]);
+    if (!reportRes.rows.length) return res.status(404).json({ message: 'Report not found' });
+    const report = reportRes.rows[0];
+
     const result = await pool.query(
-      `SELECT m.*, u.name AS sender_name FROM report_messages m
-       LEFT JOIN users u ON u.id = m.sender_user_id
-       WHERE m.report_id=$1 ORDER BY m.created_at ASC`,
+      `SELECT * FROM report_messages WHERE report_id=$1 ORDER BY created_at ASC`,
       [id]
     );
-    res.json(result.rows);
+
+    const sanitized = result.rows.map(m => {
+      const isMe = m.sender_user_id === req.user.id;
+      let senderLabel;
+      if (isMe) {
+        senderLabel = 'You';
+      } else if (m.sender_user_id === report.reporter_id) {
+        senderLabel = report.is_anonymous ? 'Anonymous Reporter' : 'Reporter';
+      } else {
+        senderLabel = 'Officer / Handler';
+      }
+      return {
+        ...m,
+        is_me: isMe,
+        sender_name: senderLabel,
+      };
+    });
+
+    res.json(sanitized);
   } catch (err) {
-    console.error(err);
+    console.error('getMessages error:', err);
     res.status(500).json({ message: 'Failed to fetch messages' });
   }
 }
@@ -146,16 +202,80 @@ async function breakGlass(req, res) {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    if (!reason) return res.status(400).json({ message: 'reason is required' });
-    const report = await pool.query('SELECT * FROM reports WHERE id=$1', [id]);
-    if (!report.rows.length) return res.status(404).json({ message: 'Report not found' });
-    await pool.query(
-      `INSERT INTO audit_log (report_id, actor_user_id, action, details) VALUES ($1,$2,'break_glass',$3)`,
-      [id, req.user.id, JSON.stringify({ reason })]
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: 'Reason for disclosure is required' });
+    }
+
+    const reportRes = await pool.query('SELECT * FROM reports WHERE id=$1', [id]);
+    if (!reportRes.rows.length) {
+      return res.status(404).json({ message: 'Report not found' });
+    }
+    const report = reportRes.rows[0];
+
+    // Fetch Admin details from identity-service
+    const adminUser = await getUserById(req.user.id);
+    const adminName = adminUser?.name || 'Platform Admin';
+
+    // Fetch real Reporter identity from identity-service
+    const reporterUser = await getUserById(report.reporter_id);
+
+    const targetDesc = report.type === 'external'
+      ? `Station ID ${report.station_id || 'N/A'}`
+      : `Organisation ID ${report.org_id || 'N/A'}`;
+
+    const auditDetailText = `Reason: ${reason.trim()}. Escalated to ${targetDesc}.`;
+
+    // Insert into audit_log
+    const auditRes = await pool.query(
+      `INSERT INTO audit_log (report_id, actor_user_id, action, details)
+       VALUES ($1, $2, 'break_glass_disclosure', $3)
+       RETURNING *`,
+      [id, req.user.id, JSON.stringify({ reason: reason.trim(), summary: auditDetailText })]
     );
-    res.json({ report: report.rows[0], access: 'granted' });
+    const auditEntry = auditRes.rows[0];
+
+    const disclosure = {
+      report_id: report.id,
+      authorization: {
+        admin_id: req.user.id,
+        admin_name: adminName,
+        reason: reason.trim(),
+        timestamp: auditEntry.created_at,
+      },
+      context: {
+        title: report.title || 'Untitled',
+        description: report.description,
+        type: report.type,
+        target: targetDesc,
+        filed_as: report.is_anonymous ? 'Anonymous' : 'Identified',
+        tracking_token: report.tracking_token || 'N/A',
+        originally_submitted: report.created_at,
+        current_status: report.status,
+      },
+      unsealed_identity: {
+        reporter_id: report.reporter_id,
+        role: reporterUser?.role || 'citizen',
+        name: reporterUser?.name || `[User #${report.reporter_id}]`,
+        email: reporterUser?.email || `[User #${report.reporter_id} email]`,
+        phone_number: reporterUser?.phone_number || null,
+      },
+      audit_entry: {
+        id: auditEntry.id,
+        actor_id: auditEntry.actor_user_id,
+        action: auditEntry.action,
+        target_id: report.id,
+        details: auditDetailText,
+        created_at: auditEntry.created_at,
+      }
+    };
+
+    res.json({
+      report,
+      disclosure,
+      access: 'granted',
+    });
   } catch (err) {
-    console.error(err);
+    console.error('breakGlass error:', err);
     res.status(500).json({ message: 'Failed to access report' });
   }
 }
@@ -170,4 +290,13 @@ async function getAuditLogs(req, res) {
   }
 }
 
-module.exports = { createReport, getMyReports, getAssignedReports, updateReportStatus, sendMessage, getMessages, breakGlass, getAuditLogs };
+module.exports = {
+  createReport,
+  getMyReports,
+  getAssignedReports,
+  updateReportStatus,
+  sendMessage,
+  getMessages,
+  breakGlass,
+  getAuditLogs,
+};

@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { createReport, fetchMyReports } from '../api/reports';
 import { fetchApprovedOrganisations, fetchApprovedStations } from '../api/auth';
 import Navbar from './Navbar';
+import ChatThread from './ChatThread';
 
 export default function CitizenDashboard() {
   const { token } = useAuth();
@@ -10,6 +11,9 @@ export default function CitizenDashboard() {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+
+  // Active chat report ID for collapsible message thread
+  const [activeChatReportId, setActiveChatReportId] = useState(null);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -27,8 +31,8 @@ export default function CitizenDashboard() {
   const [stations, setStations] = useState([]);
 
   useEffect(() => {
-    fetchApprovedOrganisations().then(setOrgs).catch(() => setOrgs([]));
-    fetchApprovedStations().then(setStations).catch(() => setStations([]));
+    fetchApprovedOrganisations().then(data => setOrgs(Array.isArray(data) ? data : [])).catch(() => setOrgs([]));
+    fetchApprovedStations().then(data => setStations(Array.isArray(data) ? data : [])).catch(() => setStations([]));
     loadReports();
   }, []);
 
@@ -66,6 +70,7 @@ export default function CitizenDashboard() {
       setIsAnonymous(false);
       setSuccessMsg('Report submitted successfully!');
       loadReports();
+      setTab('mine');
     } catch (e) {
       setSubmitError(e.response?.data?.message || 'Failed to submit report.');
     } finally {
@@ -165,7 +170,7 @@ export default function CitizenDashboard() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
               <button type="button" className="btn-outline" onClick={loadReports} disabled={loading}>
-                {loading ? 'Refreshing...' : 'Refresh'}
+                Refresh
               </button>
             </div>
             {loadError && <div className="alert alert-error">{loadError}</div>}
@@ -179,7 +184,11 @@ export default function CitizenDashboard() {
                   <div className="report-header">
                     <span className="report-title">{r.title || r.description?.slice(0, 60)}</span>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      {r.is_anonymous && <span className="status-pill" style={{ background: 'rgba(122,129,154,0.2)', color: '#7a819a' }}>anon</span>}
+                      {r.is_anonymous && (
+                        <span className="status-pill" style={{ background: 'rgba(122,129,154,0.2)', color: '#7a819a' }}>
+                          Anonymous
+                        </span>
+                      )}
                       <span className={`status-pill ${statusColors[r.status] || ''}`}>{r.status}</span>
                     </div>
                   </div>
@@ -188,6 +197,23 @@ export default function CitizenDashboard() {
                     {r.type === 'external' ? 'Police report' : 'Org report'} &bull; Filed {new Date(r.created_at).toLocaleDateString()}
                     {r.tracking_token && <> &bull; Tracking: <code style={{ fontSize: '0.75rem' }}>{r.tracking_token}</code></>}
                   </p>
+
+                  <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}
+                      onClick={() => setActiveChatReportId(activeChatReportId === r.id ? null : r.id)}
+                    >
+                      {activeChatReportId === r.id ? 'Hide Messages' : 'View / Send Messages'}
+                    </button>
+                  </div>
+
+                  {activeChatReportId === r.id && (
+                    <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+                      <ChatThread reportId={r.id} />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -1,10 +1,4 @@
-const pool = require('../config/db');
-
-// These are "internal" endpoints — meant to be called by other services
-// (intake-service), not by the frontend. In production these would sit
-// behind a network boundary (private subnet, service mesh, or an internal
-// API key) so the public internet can't reach them. Out of scope for now,
-// but worth flagging in your Future Scope slide.
+﻿const pool = require('../config/db');
 
 async function getOrgStatus(req, res) {
   try {
@@ -34,4 +28,18 @@ async function getStationStatus(req, res) {
   }
 }
 
-module.exports = { getOrgStatus, getStationStatus };
+async function getUserById(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT id, name, email, role, phone_number FROM users WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch user' });
+  }
+}
+
+module.exports = { getOrgStatus, getStationStatus, getUserById };

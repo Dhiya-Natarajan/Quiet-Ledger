@@ -12,13 +12,13 @@ export default function ChatThread({ reportId }) {
   async function load() {
     try {
       const data = await fetchMessages(token, reportId);
-      setMessages(data);
+      setMessages(Array.isArray(data) ? data : []);
     } catch (_) {}
   }
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 5000);
+    const interval = setInterval(load, 3000);
     return () => clearInterval(interval);
   }, [reportId]);
 
@@ -40,14 +40,46 @@ export default function ChatThread({ reportId }) {
 
   return (
     <div className="chat-container">
-      <h3 className="chat-title">Case Thread</h3>
+      <div className="chat-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>Anonymous Case Thread</span>
+        <button type="button" className="btn-outline" style={{ fontSize: '0.75rem', padding: '2px 8px' }} onClick={load}>
+          Refresh
+        </button>
+      </div>
       <div className="chat-messages">
-        {messages.length === 0 && <p className="muted">No messages yet.</p>}
+        {messages.length === 0 && (
+          <p className="muted" style={{ textAlign: 'center', margin: 'auto', fontSize: '0.85rem' }}>
+            No messages exchanged yet. Use the field below to send a confidential update.
+          </p>
+        )}
         {messages.map(m => (
-          <div key={m.id} className="chat-bubble">
-            <span className="chat-sender">{m.sender_name || m.sender_user_id}</span>
-            <span className="chat-text">{m.body}</span>
-            <span className="chat-time">{new Date(m.created_at).toLocaleTimeString()}</span>
+          <div
+            key={m.id}
+            className={`chat-bubble ${m.is_me ? 'chat-me' : 'chat-other'}`}
+            style={{
+              alignSelf: m.is_me ? 'flex-end' : 'flex-start',
+              background: m.is_me ? 'var(--accent)' : 'var(--surface2)',
+              color: '#fff',
+              border: m.is_me ? 'none' : '1px solid var(--border)',
+              maxWidth: '75%',
+            }}
+          >
+            <span
+              className="chat-sender"
+              style={{
+                color: m.is_me ? '#e2e6f0' : 'var(--warning)',
+                fontWeight: 600,
+                fontSize: '0.75rem',
+              }}
+            >
+              {m.sender_name || (m.is_me ? 'You' : 'User')}
+            </span>
+            <span className="chat-text" style={{ fontSize: '0.9rem', wordBreak: 'break-word' }}>
+              {m.body}
+            </span>
+            <span className="chat-time" style={{ opacity: 0.75, fontSize: '0.7rem' }}>
+              {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
           </div>
         ))}
         <div ref={bottomRef} />
@@ -56,7 +88,7 @@ export default function ChatThread({ reportId }) {
         <input
           value={text}
           onChange={e => setText(e.target.value)}
-          placeholder="Type a message..."
+          placeholder="Type an anonymous follow-up message..."
           disabled={sending}
         />
         <button className="btn-primary" type="submit" disabled={sending || !text.trim()}>

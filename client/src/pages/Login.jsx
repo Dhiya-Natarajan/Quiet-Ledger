@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,7 +17,8 @@ export default function Login() {
     setLoading(true);
     setError('');
     try {
-      const { token } = await loginUser({ email, password });
+      const trimmed = identifier.trim();
+      const { token } = await loginUser({ email: trimmed, username: trimmed, password });
       await login(token);
       navigate('/dashboard');
     } catch (err) {
@@ -35,12 +36,12 @@ export default function Login() {
           <h2>Sign In</h2>
           {error && <div className="alert alert-error">{error}</div>}
           <form onSubmit={handleSubmit} className="form-stack">
-            <label>Username / Email
+            <label>Username or Email
               <input
                 type="text"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="Enter your email address"
+                value={identifier}
+                onChange={e => setIdentifier(e.target.value)}
+                placeholder="Enter your username or email"
                 required
                 autoComplete="username"
               />

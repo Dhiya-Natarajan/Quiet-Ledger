@@ -10,6 +10,7 @@ export default function Register() {
   });
   const [orgs, setOrgs] = useState([]);
   const [stations, setStations] = useState([]);
+  const [loadingEntities, setLoadingEntities] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -31,10 +32,18 @@ export default function Register() {
   // Load org/station lists when role changes
   useEffect(() => {
     if (form.role === 'organisation') {
-      fetchApprovedOrganisations().then(setOrgs).catch(() => setOrgs([]));
+      setLoadingEntities(true);
+      fetchApprovedOrganisations()
+        .then(data => setOrgs(Array.isArray(data) ? data : []))
+        .catch(() => setOrgs([]))
+        .finally(() => setLoadingEntities(false));
     }
     if (form.role === 'police') {
-      fetchApprovedStations().then(setStations).catch(() => setStations([]));
+      setLoadingEntities(true);
+      fetchApprovedStations()
+        .then(data => setStations(Array.isArray(data) ? data : []))
+        .catch(() => setStations([]))
+        .finally(() => setLoadingEntities(false));
     }
   }, [form.role]);
 
@@ -43,9 +52,34 @@ export default function Register() {
     setLoading(true);
     setError('');
     try {
-      const payload = { ...form };
-      if (form.role !== 'organisation') delete payload.org_id;
-      if (form.role !== 'police') delete payload.station_id;
+      const payload = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        phone_number: form.phone_number?.trim() || null,
+        role: form.role,
+      };
+
+      if (form.role === 'organisation') {
+        if (!form.org_id) {
+          setError('Please select an organisation from the dropdown');
+          setLoading(false);
+          return;
+        }
+        payload.org_id = parseInt(form.org_id, 10);
+        payload.orgId = parseInt(form.org_id, 10);
+      }
+
+      if (form.role === 'police') {
+        if (!form.station_id) {
+          setError('Please select a police station from the dropdown');
+          setLoading(false);
+          return;
+        }
+        payload.station_id = parseInt(form.station_id, 10);
+        payload.stationId = parseInt(form.station_id, 10);
+      }
+
       const data = await registerUser(payload);
       await login(data.token);
       navigate('/dashboard');
@@ -75,6 +109,11 @@ export default function Register() {
         await requestStation(reqForm);
       }
       setReqSuccess('Request submitted! An admin will review and approve it. Once approved, it will appear in the dropdown.');
+      if (requestType === 'org') {
+        fetchApprovedOrganisations().then(data => setOrgs(Array.isArray(data) ? data : [])).catch(() => {});
+      } else {
+        fetchApprovedStations().then(data => setStations(Array.isArray(data) ? data : [])).catch(() => {});
+      }
     } catch (err) {
       setReqError(err.response?.data?.message || 'Failed to submit request');
     } finally {
@@ -93,24 +132,45 @@ export default function Register() {
           {error && <div className="alert alert-error">{error}</div>}
           <form onSubmit={handleSubmit} className="form-stack">
 
-            <label>Full Name
-              <input value={form.name} onChange={e => update('name', e.target.value)}
-                placeholder="Your full name" required />
+            <label>Username / Full Name
+              <input
+                value={form.name}
+                onChange={e => update('name', e.target.value)}
+                placeholder="Unique username or display name"
+                required
+                autoComplete="username"
+              />
             </label>
 
             <label>Email Address
-              <input type="email" value={form.email} onChange={e => update('email', e.target.value)}
-                placeholder="you@example.com" required />
+              <input
+                type="email"
+                value={form.email}
+                onChange={e => update('email', e.target.value)}
+                placeholder="you@example.com"
+                required
+                autoComplete="email"
+              />
             </label>
 
             <label>Phone Number
-              <input type="tel" value={form.phone_number} onChange={e => update('phone_number', e.target.value)}
-                placeholder="+91 98765 43210" />
+              <input
+                type="tel"
+                value={form.phone_number}
+                onChange={e => update('phone_number', e.target.value)}
+                placeholder="+91 98765 43210"
+              />
             </label>
 
             <label>Password
-              <input type="password" value={form.password} onChange={e => update('password', e.target.value)}
-                placeholder="Min 8 characters" required />
+              <input
+                type="password"
+                value={form.password}
+                onChange={e => update('password', e.target.value)}
+                placeholder="Min 8 characters"
+                required
+                autoComplete="new-password"
+              />
             </label>
 
             <label>Role
@@ -129,12 +189,20 @@ export default function Register() {
                   <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.25rem', marginBottom: '0.4rem' }}>
                     Choose the organisation you work for as an HR/Compliance handler. Only approved organisations appear here.
                   </p>
-                  <select value={form.org_id} onChange={e => update('org_id', e.target.value)} required>
-                    <option value="">-- Select Organisation --</option>
-                    {orgs.map(o => (
-                      <option key={o.id} value={o.id}>{o.name}</option>
-                    ))}
-                  </select>
+                  {loadingEntities ? (
+                    <p className="muted" style={{ fontSize: '0.85rem' }}>Loading approved organisations...</p>
+                  ) : orgs.length === 0 ? (
+                    <div className="alert" style={{ background: 'rgba(224,167,91,0.15)', color: 'var(--warning)', border: '1px solid rgba(224,167,91,0.3)', fontSize: '0.85rem' }}>
+                      Notice: No approved organisations found in database. Use the button below to request adding your organisation, or have an admin approve it first.
+                    </div>
+                  ) : (
+                    <select value={form.org_id} onChange={e => update('org_id', e.target.value)} required>
+                      <option value="">-- Select Organisation --</option>
+                      {orgs.map(o => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </label>
                 <button type="button" className="btn-outline" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }}
                   onClick={() => openRequestModal('org')}>
@@ -150,12 +218,20 @@ export default function Register() {
                   <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.25rem', marginBottom: '0.4rem' }}>
                     Choose the police station you work at. Only approved stations appear here.
                   </p>
-                  <select value={form.station_id} onChange={e => update('station_id', e.target.value)} required>
-                    <option value="">-- Select Police Station --</option>
-                    {stations.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
+                  {loadingEntities ? (
+                    <p className="muted" style={{ fontSize: '0.85rem' }}>Loading approved police stations...</p>
+                  ) : stations.length === 0 ? (
+                    <div className="alert" style={{ background: 'rgba(224,167,91,0.15)', color: 'var(--warning)', border: '1px solid rgba(224,167,91,0.3)', fontSize: '0.85rem' }}>
+                      Notice: No approved police stations found in database. Use the button below to request adding your station, or have an admin approve it first.
+                    </div>
+                  ) : (
+                    <select value={form.station_id} onChange={e => update('station_id', e.target.value)} required>
+                      <option value="">-- Select Police Station --</option>
+                      {stations.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </label>
                 <button type="button" className="btn-outline" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }}
                   onClick={() => openRequestModal('station')}>
