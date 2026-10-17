@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { loginUser } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
@@ -46,7 +46,13 @@ export default function Login() {
                 autoComplete="username"
               />
             </label>
-            <label>Password
+            <label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Password</span>
+                <Link to="/forgot-password" style={{ fontSize: '0.82rem', color: 'var(--accent)', textDecoration: 'none' }}>
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 type="password"
                 value={password}

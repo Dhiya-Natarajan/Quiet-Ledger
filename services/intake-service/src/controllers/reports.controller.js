@@ -1,6 +1,13 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const pool = require('../config/db');
-const { checkOrgApproved, checkStationApproved, getUserById } = require('../clients/identityClient');
+const {
+  checkOrgApproved,
+  checkStationApproved,
+  getUserById,
+  getOrgDetails,
+  getStationDetails,
+} = require('../clients/identityClient');
+const communicationClient = require('../clients/communicationClient');
 
 function generateTrackingToken() {
   return crypto.randomBytes(16).toString('hex');
@@ -45,7 +52,34 @@ async function createReport(req, res) {
       [reporterId, title || description.slice(0, 80), resolvedType, orgId || null, stationId || null,
        !!isAnonymous, trackingToken, description, lat || null, lng || null, verified]
     );
-    res.status(201).json(result.rows[0]);
+
+    const createdReport = result.rows[0];
+    res.status(201).json(createdReport);
+
+    // Asynchronously dispatch notifications via Communication Service (fail-open)
+    (async () => {
+      try {
+        let entity = null;
+        if (resolvedType === 'internal' && orgId) {
+          entity = await getOrgDetails(orgId);
+        } else if (resolvedType === 'external' && stationId) {
+          entity = await getStationDetails(stationId);
+        }
+
+        let reporter = null;
+        if (!isAnonymous && reporterId) {
+          reporter = await getUserById(reporterId);
+        }
+
+        await communicationClient.notifyReportCreated({
+          report: createdReport,
+          reporter,
+          entity,
+        });
+      } catch (commsErr) {
+        console.warn('[fail-open] Communication dispatch failed on createReport:', commsErr.message);
+      }
+    })();
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to create report' });
@@ -83,15 +117,18 @@ async function getAssignedReports(req, res) {
 
     const reportsWithDetails = await Promise.all(
       result.rows.map(async (r) => {
-        if (r.is_anonymous) {
+        const isDisclosed = Boolean(r.is_unmasked);
+
+        if (r.is_anonymous && !isDisclosed) {
           return {
             ...r,
             reporter_id: null,
             reporter: null,
+            is_unmasked: false,
           };
         }
 
-        // When NOT anonymous, fetch the real personal details from identity-service
+        // When NOT anonymous OR when unmasked via break-glass, fetch the real personal details from identity-service
         let reporterInfo = null;
         if (r.reporter_id) {
           const u = await getUserById(r.reporter_id);
@@ -109,6 +146,12 @@ async function getAssignedReports(req, res) {
         return {
           ...r,
           reporter: reporterInfo,
+          is_unmasked: isDisclosed,
+          break_glass: isDisclosed ? {
+            reason: r.break_glass_reason,
+            unmasked_by: r.break_glass_by,
+            unmasked_at: r.break_glass_at,
+          } : null,
         };
       })
     );
@@ -139,7 +182,27 @@ async function updateReportStatus(req, res) {
       `INSERT INTO audit_log (report_id, actor_user_id, action, details) VALUES ($1,$2,$3,$4)`,
       [id, req.user.id, 'status_change', JSON.stringify({ from: current, to: status })]
     );
-    res.json(updated.rows[0]);
+
+    const updatedReport = updated.rows[0];
+    res.json(updatedReport);
+
+    // Asynchronously dispatch status change notification via Communication Service (fail-open)
+    (async () => {
+      try {
+        let reporter = null;
+        if (updatedReport.reporter_id) {
+          reporter = await getUserById(updatedReport.reporter_id);
+        }
+        await communicationClient.notifyStatusUpdated({
+          report: updatedReport,
+          oldStatus: current,
+          newStatus: status,
+          reporter,
+        });
+      } catch (commsErr) {
+        console.warn('[fail-open] Communication dispatch failed on updateReportStatus:', commsErr.message);
+      }
+    })();
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to update status' });
@@ -155,7 +218,33 @@ async function sendMessage(req, res) {
       `INSERT INTO report_messages (report_id, sender_user_id, body) VALUES ($1,$2,$3) RETURNING *`,
       [id, req.user.id, body.trim()]
     );
-    res.status(201).json(result.rows[0]);
+
+    const createdMessage = result.rows[0];
+    res.status(201).json(createdMessage);
+
+    // Asynchronously dispatch chat alert via Communication Service (fail-open)
+    (async () => {
+      try {
+        const reportRes = await pool.query('SELECT * FROM reports WHERE id=$1', [id]);
+        if (reportRes.rows.length) {
+          const report = reportRes.rows[0];
+          const senderUser = await getUserById(req.user.id);
+          const isMeReporter = String(req.user.id) === String(report.reporter_id);
+          const senderLabel = isMeReporter
+            ? (report.is_anonymous ? 'Anonymous Reporter' : (senderUser?.name || 'Reporter'))
+            : (senderUser?.name || 'Officer / Handler');
+
+          await communicationClient.notifyMessageSent({
+            report,
+            message: createdMessage,
+            senderId: req.user.id,
+            senderName: senderLabel,
+          });
+        }
+      } catch (commsErr) {
+        console.warn('[fail-open] Communication dispatch failed on sendMessage:', commsErr.message);
+      }
+    })();
   } catch (err) {
     console.error('sendMessage error:', err);
     res.status(500).json({ message: 'Failed to send message' });
@@ -269,11 +358,43 @@ async function breakGlass(req, res) {
       }
     };
 
+    // Update the report to mark it as unmasked
+    await pool.query(
+      `UPDATE reports SET is_unmasked = true, break_glass_reason = $1, break_glass_by = $2, break_glass_at = $3 WHERE id = $4`,
+      [reason.trim(), adminName, auditEntry.created_at, id]
+    );
+
+    // Fetch target handler's contact email
+    let targetContactEmail = null;
+    if (report.type === 'internal' && report.org_id) {
+      const org = await getOrgDetails(report.org_id);
+      targetContactEmail = org?.contact_email;
+    } else if (report.type === 'external' && report.station_id) {
+      const stn = await getStationDetails(report.station_id);
+      targetContactEmail = stn?.contact_email;
+    }
+
     res.json({
-      report,
+      report: { ...report, is_unmasked: true },
       disclosure,
       access: 'granted',
     });
+
+    // Asynchronously dispatch emergency audit notification via Communication Service (fail-open)
+    (async () => {
+      try {
+        await communicationClient.notifyBreakGlass({
+          report,
+          adminUser,
+          reporterUser,
+          reason: reason.trim(),
+          targetDesc,
+          targetContactEmail,
+        });
+      } catch (commsErr) {
+        console.warn('[fail-open] Communication dispatch failed on breakGlass:', commsErr.message);
+      }
+    })();
   } catch (err) {
     console.error('breakGlass error:', err);
     res.status(500).json({ message: 'Failed to access report' });

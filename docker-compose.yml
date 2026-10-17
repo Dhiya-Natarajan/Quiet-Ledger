@@ -26,5 +26,20 @@ services:
     depends_on:
       - db
 
+  communication-service:
+    build:
+      context: ./services/communication-service
+      dockerfile: Dockerfile
+    container_name: quietledger-communication-service
+    ports:
+      - "4003:4003"
+    environment:
+      PORT: 4003
+      DATABASE_URL: "postgresql://quietledger:quietledger_dev@db:5432/communication_db?schema=public"
+      JWT_SECRET: "quietledger_shared_secret"
+      ENABLE_MOCK_SMS: "true"
+    depends_on:
+      - db
+
 volumes:
   quietledger_pgdata:

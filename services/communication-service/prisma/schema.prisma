@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notifications")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  mediaUrl       String?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Conversation {
+  id        String               @id @default(uuid())
+  title     String?
+  isGroup   Boolean              @default(false)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  messages  Message[]
+  members   ConversationMember[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String       @id @default(uuid())
+  conversationId String
+  userId         String
+  joinedAt       DateTime     @default(now())
+  role           String       @default("MEMBER")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@map("conversation_members")
+}
+
+model DeliveryLog {
+  id          String    @id @default(uuid())
+  channel     String    // EMAIL | SMS
+  recipient   String
+  subject     String?
+  content     String
+  status      String    // PENDING | SENT | FAILED | RETRYING
+  error       String?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  nextRetryAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("delivery_logs")
+}
+
+model NotificationPreference {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  emailEnabled  Boolean  @default(true)
+  smsEnabled    Boolean  @default(true)
+  inAppEnabled  Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("notification_preferences")
+}

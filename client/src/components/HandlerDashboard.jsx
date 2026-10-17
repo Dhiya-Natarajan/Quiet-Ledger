@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { fetchAssignedReports, updateReportStatus } from '../api/reports';
 import ChatThread from './ChatThread';
@@ -85,7 +85,11 @@ export default function HandlerDashboard() {
                 <div className="report-header">
                   <span className="report-title">#{r.id} - {r.title}</span>
                   <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                    {r.is_anonymous ? (
+                    {r.is_unmasked ? (
+                      <span className="status-pill" style={{ background: 'rgba(224,91,91,0.2)', color: '#f87171', border: '1px solid #ef4444', fontSize: '0.72rem', fontWeight: 700 }}>
+                        🚨 Unmasked
+                      </span>
+                    ) : r.is_anonymous ? (
                       <span className="status-pill" style={{ background: 'rgba(122,129,154,0.2)', color: '#7a819a', fontSize: '0.72rem' }}>
                         Anonymous
                       </span>
@@ -123,7 +127,65 @@ export default function HandlerDashboard() {
                   </div>
 
                   {/* Reporter Personal Details Section */}
-                  {activeReport.is_anonymous ? (
+                  {activeReport.is_unmasked ? (
+                    <div style={{
+                      background: 'rgba(224, 91, 91, 0.08)',
+                      border: '1px solid rgba(224, 91, 91, 0.4)',
+                      borderLeft: '4px solid var(--danger, #e05b5b)',
+                      padding: '1rem',
+                      borderRadius: '0 6px 6px 0',
+                      marginBottom: '1rem',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                        <span className="status-pill status-closed" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
+                          🚨 Emergency Break-Glass Unsealed Citizen Identity
+                        </span>
+                        {activeReport.break_glass?.unmasked_at && (
+                          <span className="muted" style={{ fontSize: '0.75rem' }}>
+                            Unsealed: {new Date(activeReport.break_glass.unmasked_at).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+
+                      {activeReport.break_glass?.reason && (
+                        <div style={{
+                          fontSize: '0.82rem',
+                          color: '#fca5a5',
+                          marginBottom: '0.75rem',
+                          background: 'rgba(0,0,0,0.25)',
+                          padding: '6px 10px',
+                          borderRadius: '4px',
+                          border: '1px solid rgba(224, 91, 91, 0.2)'
+                        }}>
+                          <strong>Disclosure Justification:</strong> {activeReport.break_glass.reason}
+                          {activeReport.break_glass.unmasked_by && (
+                            <span style={{ color: '#aaa', marginLeft: '6px' }}>(Authorized by {activeReport.break_glass.unmasked_by})</span>
+                          )}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', fontSize: '0.88rem' }}>
+                        <div>
+                          <span className="muted" style={{ fontSize: '0.75rem', display: 'block' }}>Citizen Full Name</span>
+                          <strong style={{ color: '#fff', fontSize: '0.95rem' }}>
+                            {activeReport.reporter?.name || `User #${activeReport.reporter_id}`}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="muted" style={{ fontSize: '0.75rem', display: 'block' }}>Email Address</span>
+                          <a href={`mailto:${activeReport.reporter?.email}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                            {activeReport.reporter?.email || 'N/A'}
+                          </a>
+                        </div>
+                        <div>
+                          <span className="muted" style={{ fontSize: '0.75rem', display: 'block' }}>Contact Phone</span>
+                          <span style={{ color: '#fff' }}>
+                            {activeReport.reporter?.phone_number || 'Not provided'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : activeReport.is_anonymous ? (
                     <div style={{
                       background: 'var(--surface2)',
                       borderLeft: '4px solid var(--muted)',

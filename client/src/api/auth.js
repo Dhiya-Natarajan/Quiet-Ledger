@@ -1,4 +1,4 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 
 const IDENTITY_URL = import.meta.env.VITE_IDENTITY_SERVICE_URL || 'http://localhost:4001';
 
@@ -13,6 +13,16 @@ export async function registerUser(data) {
 
 export async function loginUser(data) {
   const res = await axios.post(`${IDENTITY_URL}/auth/login`, data);
+  return res.data;
+}
+
+export async function forgotPassword(email) {
+  const res = await axios.post(`${IDENTITY_URL}/auth/forgot-password`, { email });
+  return res.data;
+}
+
+export async function resetPassword(data) {
+  const res = await axios.post(`${IDENTITY_URL}/auth/reset-password`, data);
   return res.data;
 }
 
